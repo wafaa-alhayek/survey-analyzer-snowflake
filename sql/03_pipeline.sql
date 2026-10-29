@@ -6,8 +6,8 @@
 -- What it does, all inside your Snowflake account:
 --   1. Pattern redaction: emails and phone/ID numbers are replaced with
 --      [EMAIL] / [PHONE] before any AI model sees the text.
---   2. One Cortex call per response: detects the language, removes names
---      and addresses, translates to English, labels sentiment and picks
+--   2. One Cortex call per response (retried once if unreadable): removes names
+--      and addresses (not family words), translates to English, labels sentiment, picks
 --      1-3 short topics. Works for Arabic and English (and most others).
 --   3. One Cortex call per survey: groups all topics into 4-8 themes.
 --   4. One Cortex call per response: assigns each response to one theme.
@@ -17,6 +17,26 @@
 
 USE WAREHOUSE SURVEY_WH;
 USE SCHEMA SURVEY_ANALYZER.CORE;
+
+-- The instructions sent to the model for each response, kept in one place.
+CREATE OR REPLACE FUNCTION ENRICH_PROMPT(QUESTION STRING, RESPONSE STRING)
+RETURNS STRING
+AS
+$$
+  'You analyze survey responses for a humanitarian research team. '
+  || 'Return ONLY one JSON object and no other text, with these keys: '
+  || '"language": ISO 639-1 code of the response such as "ar" or "en"; '
+  || '"redacted": the response in its ORIGINAL language, unchanged except that every '
+  || 'personal name of a real person (such as Sami, Layla, Ahmad) is replaced by [NAME], every exact '
+  || 'address or home location by [ADDRESS], every phone number by [PHONE], every email by [EMAIL] '
+  || 'and every ID number by [ID]. Do NOT replace family or relationship words: keep words like '
+  || 'mother, father, son, my children, my sister, والدي, أمي, ابني, أختي, أطفالي exactly as written; '
+  || '"english": an English translation of the redacted text; '
+  || '"sentiment": one of "positive", "neutral", "negative", "mixed"; '
+  || '"topics": an array of 1 to 3 short English topic phrases of 2 to 4 words each. '
+  || 'Survey question: ' || COALESCE(QUESTION, 'not provided')
+  || ' Response: <<<' || RESPONSE || '>>>'
+$$;
 
 CREATE OR REPLACE PROCEDURE RUN_ANALYSIS(P_SURVEY_ID STRING, P_MODEL STRING)
 RETURNS STRING
@@ -34,13 +54,19 @@ BEGIN
   DELETE FROM THEMES             WHERE SURVEY_ID = :P_SURVEY_ID;
   DELETE FROM RESPONSES_ENRICHED WHERE SURVEY_ID = :P_SURVEY_ID;
 
-  -- Steps 1 + 2: pattern redaction, then one model call per response
+  -- Steps 1 + 2: pattern redaction, then one model call per response.
+  -- First pass keeps only answers the model returned in a readable form.
   INSERT INTO RESPONSES_ENRICHED
     (RESPONSE_ID, SURVEY_ID, REGION, AGE_GROUP, LANGUAGE, TEXT_REDACTED,
      TEXT_EN, SENTIMENT_LABEL, TOPICS, MODEL)
   SELECT
     RESPONSE_ID, SURVEY_ID, REGION, AGE_GROUP,
-    COALESCE(J:language::STRING, 'unknown'),
+    -- Arabic script in the text decides "ar"; the model only guesses otherwise
+    CASE
+      WHEN REGEXP_INSTR(PRE_REDACTED, '[ء-ي]') > 0 THEN 'ar'
+      WHEN LOWER(J:language::STRING) = 'ar' THEN 'en'
+      ELSE COALESCE(LOWER(J:language::STRING), 'unknown')
+    END,
     -- If the model output cannot be read, keep the pattern-redacted text
     COALESCE(J:redacted::STRING, PRE_REDACTED),
     J:english::STRING,
@@ -52,20 +78,7 @@ BEGIN
            TRY_PARSE_JSON(REGEXP_SUBSTR(L.LLM_OUT, '\\{.*\\}', 1, 1, 's')) AS J
     FROM (
       SELECT R.*,
-        SNOWFLAKE.CORTEX.COMPLETE(
-          :P_MODEL,
-          'You analyze survey responses for a humanitarian research team. '
-          || 'Return ONLY one JSON object and no other text, with these keys: '
-          || '"language": ISO 639-1 code of the response such as "ar" or "en"; '
-          || '"redacted": the response in its ORIGINAL language, unchanged except that every '
-          || 'personal name is replaced by [NAME], every exact address or home location by [ADDRESS], '
-          || 'every phone number by [PHONE], every email by [EMAIL] and every ID number by [ID]; '
-          || '"english": an English translation of the redacted text; '
-          || '"sentiment": one of "positive", "neutral", "negative", "mixed"; '
-          || '"topics": an array of 1 to 3 short English topic phrases of 2 to 4 words each. '
-          || 'Survey question: ' || COALESCE(R.QUESTION, 'not provided')
-          || ' Response: <<<' || R.PRE_REDACTED || '>>>'
-        ) AS LLM_OUT
+        SNOWFLAKE.CORTEX.COMPLETE(:P_MODEL, ENRICH_PROMPT(R.QUESTION, R.PRE_REDACTED)) AS LLM_OUT
       FROM (
         SELECT RESPONSE_ID, SURVEY_ID, REGION, AGE_GROUP, QUESTION,
           REGEXP_REPLACE(
@@ -74,9 +87,52 @@ BEGIN
             '\\+?[0-9٠-٩][0-9٠-٩ ()-]{6,}[0-9٠-٩]', '[PHONE]') AS PRE_REDACTED
         FROM RESPONSES_RAW
         WHERE SURVEY_ID = :P_SURVEY_ID
+          AND RESPONSE_ID NOT IN (
+            SELECT RESPONSE_ID FROM RESPONSES_ENRICHED WHERE SURVEY_ID = :P_SURVEY_ID)
       ) R
     ) L
-  );
+  )
+  WHERE J:english IS NOT NULL;
+
+  -- Second pass: retry the rest once. Anything still unreadable keeps the
+  -- pattern-redacted text without a translation.
+  INSERT INTO RESPONSES_ENRICHED
+    (RESPONSE_ID, SURVEY_ID, REGION, AGE_GROUP, LANGUAGE, TEXT_REDACTED,
+     TEXT_EN, SENTIMENT_LABEL, TOPICS, MODEL)
+  SELECT
+    RESPONSE_ID, SURVEY_ID, REGION, AGE_GROUP,
+    -- Arabic script in the text decides "ar"; the model only guesses otherwise
+    CASE
+      WHEN REGEXP_INSTR(PRE_REDACTED, '[ء-ي]') > 0 THEN 'ar'
+      WHEN LOWER(J:language::STRING) = 'ar' THEN 'en'
+      ELSE COALESCE(LOWER(J:language::STRING), 'unknown')
+    END,
+    -- If the model output cannot be read, keep the pattern-redacted text
+    COALESCE(J:redacted::STRING, PRE_REDACTED),
+    J:english::STRING,
+    LOWER(J:sentiment::STRING),
+    IFF(IS_ARRAY(J:topics), J:topics::ARRAY, ARRAY_CONSTRUCT()),
+    :P_MODEL
+  FROM (
+    SELECT L.*,
+           TRY_PARSE_JSON(REGEXP_SUBSTR(L.LLM_OUT, '\\{.*\\}', 1, 1, 's')) AS J
+    FROM (
+      SELECT R.*,
+        SNOWFLAKE.CORTEX.COMPLETE(:P_MODEL, ENRICH_PROMPT(R.QUESTION, R.PRE_REDACTED)) AS LLM_OUT
+      FROM (
+        SELECT RESPONSE_ID, SURVEY_ID, REGION, AGE_GROUP, QUESTION,
+          REGEXP_REPLACE(
+            REGEXP_REPLACE(RESPONSE_TEXT,
+              '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}', '[EMAIL]'),
+            '\\+?[0-9٠-٩][0-9٠-٩ ()-]{6,}[0-9٠-٩]', '[PHONE]') AS PRE_REDACTED
+        FROM RESPONSES_RAW
+        WHERE SURVEY_ID = :P_SURVEY_ID
+          AND RESPONSE_ID NOT IN (
+            SELECT RESPONSE_ID FROM RESPONSES_ENRICHED WHERE SURVEY_ID = :P_SURVEY_ID)
+      ) R
+    ) L
+  )
+;
 
   -- Step 5 (run early so the theme step can be retried alone if needed):
   -- numeric sentiment on the English text
