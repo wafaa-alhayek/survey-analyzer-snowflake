@@ -27,11 +27,13 @@ Built for research and humanitarian teams that cannot send respondents' words to
 | `sql/02_sample_data.sql` | 40 synthetic responses (20 Arabic, 20 English), no real people |
 | `sql/03_pipeline.sql` | `RUN_ANALYSIS` procedure: redact, translate, sentiment, themes |
 | `sql/04_report_views.sql` | Group-only reporting views and `DELETE_SURVEY` procedure |
+| `sql/06_clients.sql` | Client logins, consent, automatic deletion for pilots |
 | `sql/05_fixes.sql` | One-off fixes for installs made before 2026-10-09 (theme %, sentiment score) |
 | `streamlit/streamlit_app.py` | Streamlit in Snowflake screen: results, CSV upload, delete |
 | `data/sample_responses.csv` | Same synthetic data as a CSV, for testing the upload |
 | `docs/SETUP.md` | Step-by-step setup in Snowsight |
 | `docs/CONNECT_CLAUDE.md` | Connect Claude to the summary views (read-only) |
+| `docs/PILOT_CLIENTS.md` | Give a pilot client their own link |
 | `docs/CONNECT_GITHUB.md` | Sync this repo into a Snowflake Workspace |
 
 ## Quick start

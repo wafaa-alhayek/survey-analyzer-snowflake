@@ -5,6 +5,7 @@ Paste this file into a new Streamlit app in Snowsight (see docs/SETUP.md).
 Everything runs inside your Snowflake account: the app reads only the
 privacy-safe views, and analysis runs on Snowflake Cortex models.
 """
+import re
 import uuid
 
 import pandas as pd
@@ -23,16 +24,55 @@ def query(sql, params=None):
     return session.sql(sql, params=params or []).to_pandas()
 
 
+def viewer_name():
+    """Login name of the person viewing the app (not the app owner)."""
+    for attr in ("user", "experimental_user"):
+        info = getattr(st, attr, None)
+        if info is None:
+            continue
+        for key in ("user_name", "login_name"):
+            try:
+                value = info.get(key) if hasattr(info, "get") else getattr(info, key, None)
+            except Exception:
+                value = None
+            if value:
+                return str(value).upper()
+    return ""
+
+
+VIEWER = viewer_name()
+IS_ADMIN = not query(f"SELECT 1 FROM {DB}.APP_ADMINS WHERE UPPER(SNOWFLAKE_USER) = ?", [VIEWER]).empty
+client_row = query(
+    f"SELECT CLIENT_ID, CLIENT_NAME, RETENTION_DAYS FROM {DB}.CLIENTS WHERE UPPER(SNOWFLAKE_USER) = ?",
+    [VIEWER],
+)
+CLIENT = None if client_row.empty else client_row.iloc[0]
+
+
 def surveys():
-    df = query(f"SELECT DISTINCT SURVEY_ID FROM {DB}.RESPONSES_RAW ORDER BY 1")
+    if IS_ADMIN:
+        df = query(
+            f"SELECT SURVEY_ID FROM {DB}.SURVEYS UNION SELECT DISTINCT SURVEY_ID FROM {DB}.RESPONSES_RAW ORDER BY 1"
+        )
+    else:
+        df = query(f"SELECT SURVEY_ID FROM {DB}.SURVEYS WHERE CLIENT_ID = ? ORDER BY 1", [CLIENT["CLIENT_ID"]])
     return df["SURVEY_ID"].tolist()
 
 
-st.title("Survey Analyzer")
+st.title("Survey Analyzer by Describe")
+if not IS_ADMIN and CLIENT is None:
+    # Unknown logins see nothing. Add them to CLIENTS or APP_ADMINS first.
+    st.error("This login has no access yet. Please contact Describe.")
+    st.stop()
 st.caption(
     "Responses never leave this Snowflake account. Personal details are removed "
     f"before analysis, and groups smaller than {MIN_GROUP} are hidden."
 )
+if CLIENT is not None:
+    st.caption(
+        f"Signed in for {CLIENT['CLIENT_NAME']}. Raw answers are deleted automatically "
+        f"{int(CLIENT['RETENTION_DAYS'])} days after upload."
+    )
 
 # ---------------------------------------------------------------- sidebar
 with st.sidebar:
@@ -43,12 +83,15 @@ with st.sidebar:
         survey = None
     else:
         survey = st.selectbox("Choose a survey", options)
-    model = st.selectbox(
-        "Model",
-        MODELS,
-        help="llama3.1-70b is a good default for Arabic and English. "
-        "llama3.1-8b is cheapest but weaker at Arabic.",
-    )
+    if IS_ADMIN:
+        model = st.selectbox(
+            "Model",
+            MODELS,
+            help="llama3.1-70b is a good default for Arabic and English. "
+            "llama3.1-8b is cheapest but weaker at Arabic.",
+        )
+    else:
+        model = MODELS[0]
     if survey and st.button("Run analysis", type="primary"):
         with st.spinner("Analyzing responses with Cortex. This takes a minute or two..."):
             result = session.call(f"{DB}.RUN_ANALYSIS", survey, model)
@@ -139,7 +182,20 @@ with tab_add:
         "Required column: `response_text`. Optional columns: `question`, `region`, `age_group`. "
         "UTF-8 encoding works for Arabic. Do not include names or contact columns."
     )
-    new_id = st.text_input("Survey name (letters, numbers, underscores)", "MY_SURVEY_2026")
+    name = st.text_input("Survey name (letters, numbers, underscores)", "MY_SURVEY_2026")
+    new_id = re.sub(r"[^A-Z0-9_]", "", name.strip().upper().replace(" ", "_"))
+    if CLIENT is not None:
+        # Prefix keeps each client's surveys apart
+        new_id = f"{CLIENT['CLIENT_ID']}_{new_id}"
+    taken = new_id in surveys() or not query(
+        f"SELECT 1 FROM {DB}.SURVEYS WHERE SURVEY_ID = ?", [new_id]
+    ).empty
+    if taken:
+        st.warning(f"A survey called {new_id} already exists. Choose another name.")
+    consent = st.checkbox(
+        "I confirm that every respondent gave informed consent for their answers to be analyzed, "
+        "and that the file contains no names, phone numbers or other contact details."
+    )
     upload = st.file_uploader("CSV file", type=["csv"])
     if upload is not None:
         df = pd.read_csv(upload, dtype=str)
@@ -151,13 +207,17 @@ with tab_add:
             df = df[keep].dropna(subset=["response_text"])
             st.write(f"{len(df)} responses found. First rows:")
             st.dataframe(df.head(5), use_container_width=True)
-            if st.button("Load into Snowflake"):
-                df.insert(0, "survey_id", new_id.strip().upper())
+            if st.button("Load into Snowflake", disabled=not consent or taken or not new_id):
+                df.insert(0, "survey_id", new_id)
                 df.insert(0, "response_id", [str(uuid.uuid4()) for _ in range(len(df))])
                 df.columns = [c.upper() for c in df.columns]
                 session.create_dataframe(df).write.save_as_table(
                     f"{DB}.RESPONSES_RAW", mode="append", column_order="name"
                 )
+                session.sql(
+                    f"INSERT INTO {DB}.SURVEYS (SURVEY_ID, CLIENT_ID, CONSENT_CONFIRMED) VALUES (?, ?, TRUE)",
+                    params=[new_id, None if CLIENT is None else CLIENT["CLIENT_ID"]],
+                ).collect()
                 st.success(f"Loaded {len(df)} responses. Pick the survey in the sidebar and click Run analysis.")
 
 # ---------------------------------------------------------------- manage
@@ -171,3 +231,4 @@ with tab_manage:
         confirm = st.checkbox(f"I want to permanently delete all data for {survey}")
         if confirm and st.button("Delete survey data"):
             st.success(session.call(f"{DB}.DELETE_SURVEY", survey))
+            session.sql(f"DELETE FROM {DB}.SURVEYS WHERE SURVEY_ID = ?", params=[survey]).collect()
