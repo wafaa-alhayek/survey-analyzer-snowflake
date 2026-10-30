@@ -1,9 +1,16 @@
 [project]
 name = "survey-analyzer"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = "~=3.11.0"
 dependencies = [
-    "streamlit>=1.40",
+    "streamlit[snowflake]>=1.40",
     "pandas",
     "snowflake-snowpark-python",
 ]
+
+[tool.uv]
+constraint-dependencies = ["numba>=0.56.0"]
+exclude-newer = "7 days"
+
+[tool.uv.exclude-newer-package]
+streamlit = false
