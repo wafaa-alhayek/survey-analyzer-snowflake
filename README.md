@@ -51,3 +51,9 @@ Follow [docs/SETUP.md](docs/SETUP.md). In short: run the four SQL files in order
 - Add Snowflake's `AI_REDACT` function for redaction where it is available in your region.
 - Schedule `RUN_ANALYSIS` with a Snowflake Task for surveys that collect continuously.
 - A self-hosted version on Google Cloud for teams that cannot use any cloud data platform.
+
+## Also in this repo: Ask your reports
+
+[ask-reports/](ask-reports/README.md) lets clients upload PDFs and ask questions
+in Arabic or English, with every answer citing its page. It reuses this
+project's warehouse, client logins and GitHub connection.
