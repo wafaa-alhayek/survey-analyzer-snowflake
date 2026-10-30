@@ -97,6 +97,9 @@ with st.sidebar:
             result = session.call(f"{DB}.RUN_ANALYSIS", survey, model)
         st.success(result)
 
+if "loaded_msg" in st.session_state:
+    st.success(st.session_state.pop("loaded_msg"))
+
 tab_results, tab_add, tab_manage = st.tabs(["Results", "Add data", "Manage"])
 
 # ---------------------------------------------------------------- results
@@ -218,7 +221,10 @@ with tab_add:
                     f"INSERT INTO {DB}.SURVEYS (SURVEY_ID, CLIENT_ID, CONSENT_CONFIRMED) VALUES (?, ?, TRUE)",
                     params=[new_id, None if CLIENT is None else CLIENT["CLIENT_ID"]],
                 ).collect()
-                st.success(f"Loaded {len(df)} responses. Pick the survey in the sidebar and click Run analysis.")
+                st.session_state["loaded_msg"] = (
+                    f"Loaded {len(df)} responses into {new_id}. Pick it in the sidebar and click Run analysis."
+                )
+                st.rerun()  # redraw so the sidebar lists the new survey
 
 # ---------------------------------------------------------------- manage
 with tab_manage:
