@@ -37,7 +37,7 @@ Paste [`sql/04_report_views.sql`](../sql/04_report_views.sql) and **Run All**. Y
 
 ## 6. Try your own data
 
-In the app's **Add data** tab, upload a CSV with a `response_text` column (optional: `question`, `region`, `age_group`). You can test with [`data/sample_responses.csv`](../data/sample_responses.csv). Then choose the new survey in the sidebar and click **Run analysis**.
+In the app's **Add data** tab, upload a CSV with a `response_text` column (optional: `question`, `region`, `age_group`). You can test with [`data/sample_responses.csv`](../data/sample_responses.csv). Click **Load and analyze**: the app loads the file, analyzes it and opens the results. Use **Run analysis** in the sidebar only to re-run a survey.
 
 ## Keeping credit use small
 

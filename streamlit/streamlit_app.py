@@ -82,7 +82,10 @@ with st.sidebar:
         st.info("No surveys yet. Load one in the 'Add data' tab.")
         survey = None
     else:
-        survey = st.selectbox("Choose a survey", options)
+        # After an upload, open the new survey straight away
+        if st.session_state.get("pending_pick") in options:
+            st.session_state["survey_pick"] = st.session_state.pop("pending_pick")
+        survey = st.selectbox("Choose a survey", options, key="survey_pick")
     if IS_ADMIN:
         model = st.selectbox(
             "Model",
@@ -210,7 +213,7 @@ with tab_add:
             df = df[keep].dropna(subset=["response_text"])
             st.write(f"{len(df)} responses found. First rows:")
             st.dataframe(df.head(5), use_container_width=True)
-            if st.button("Load into Snowflake", disabled=not consent or taken or not new_id):
+            if st.button("Load and analyze", type="primary", disabled=not consent or taken or not new_id):
                 df.insert(0, "survey_id", new_id)
                 df.insert(0, "response_id", [str(uuid.uuid4()) for _ in range(len(df))])
                 df.columns = [c.upper() for c in df.columns]
@@ -221,10 +224,11 @@ with tab_add:
                     f"INSERT INTO {DB}.SURVEYS (SURVEY_ID, CLIENT_ID, CONSENT_CONFIRMED) VALUES (?, ?, TRUE)",
                     params=[new_id, None if CLIENT is None else CLIENT["CLIENT_ID"]],
                 ).collect()
-                st.session_state["loaded_msg"] = (
-                    f"Loaded {len(df)} responses into {new_id}. Pick it in the sidebar and click Run analysis."
-                )
-                st.rerun()  # redraw so the sidebar lists the new survey
+                with st.spinner(f"Loaded {len(df)} responses. Analyzing with Cortex, this takes a minute or two..."):
+                    result = session.call(f"{DB}.RUN_ANALYSIS", new_id, model)
+                st.session_state["loaded_msg"] = f"{new_id} is ready. {result}"
+                st.session_state["pending_pick"] = new_id
+                st.rerun()  # redraw with the new survey selected and its results showing
 
 # ---------------------------------------------------------------- manage
 with tab_manage:
