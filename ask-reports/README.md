@@ -37,6 +37,7 @@ Needs the Survey Analyzer's `SURVEY_WH`, client tables and `APP_REPO`
 
 | File | What it does | Time |
 |---|---|---|
+| `sql/00_claude_builder.sql` | Optional: lets Claude run and fix files 01 to 05 itself, inside `ASK_REPORTS` only | seconds |
 | `sql/01_setup.sql` | Database `ASK_REPORTS`, PDF stage, tables, the two demo collections | seconds |
 | `sql/02_ingest.sql` | Procedures `INGEST`, `DRAFT_SAVED_ANSWERS`, `DELETE_DOCUMENT`, `DELETE_COLLECTION` | seconds |
 | `sql/03_load_demo.sql` | Copies the 10 demo PDFs from GitHub and reads them | a few minutes |
