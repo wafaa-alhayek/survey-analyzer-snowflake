@@ -77,9 +77,11 @@ uses Claude and falls back to `llama3.3-70b`.
 
 ## What was tested
 
-Tested on the live account through the read-only connector: the models
-above, the multilingual embedding scores, chunking, and the saved-answer
-prompt (Claude returned valid JSON with Arabic questions, answers and page
-numbers). Not yet tested: the stage, PARSE_DOCUMENT on the demo PDFs, the
-search service and the app itself. Expect a fix or two on the first run.
-The checks at the end of files 03 and 04 show whether each step worked.
+Run end to end on the live account on 5 Nov 2026 by Claude, as CLAUDE_BUILDER:
+all 10 demo PDFs read (96 pages, including the Arabic factsheet), 393
+chunks, 80 saved answers in English and Arabic, search service built, app
+published. An Arabic question found the right English paper. An Arabic
+rewording of a saved question matched at 0.94; the next closest question
+scored 0.77. A fresh Claude answer cited the right report pages, and two of
+its figures were checked against the PDFs. The app screen itself has not
+been opened yet.

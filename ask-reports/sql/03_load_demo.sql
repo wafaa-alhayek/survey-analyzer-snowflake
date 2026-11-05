@@ -27,7 +27,7 @@ ALTER STAGE ASK_REPORTS.CORE.DOCS REFRESH;
 
 -- Titles and public links, so answers cite "OCHA report, 22 Oct 2026, page 3"
 -- instead of a file name. See ask-reports/demo/SOURCES.md.
-MERGE INTO DOCUMENTS t
+MERGE INTO ASK_REPORTS.CORE.DOCUMENTS t
 USING (
   SELECT column1 AS DOC_ID, column2 AS TITLE, column3 AS SOURCE_URL FROM VALUES
   ('GAZA_REPORTS/ocha_sitrep_2026-10-22.pdf', 'OCHA Humanitarian Situation Report, 22 October 2026', 'https://reliefweb.int/attachments/7c28e9ad-db5e-4434-aed7-8868e97fd7ac/'),
@@ -53,8 +53,8 @@ CALL INGEST('claude-sonnet-4-5');
 
 -- Check: one row per document, all READY, with pages and saved answers
 SELECT d.COLLECTION, d.TITLE, d.STATUS, d.PAGE_COUNT,
-       (SELECT COUNT(*) FROM CHUNKS c WHERE c.DOC_ID = d.DOC_ID) AS CHUNKS,
-       (SELECT COUNT(*) FROM SAVED_ANSWERS s WHERE s.DOC_ID = d.DOC_ID) AS SAVED_ANSWERS,
+       (SELECT COUNT(*) FROM ASK_REPORTS.CORE.CHUNKS c WHERE c.DOC_ID = d.DOC_ID) AS CHUNKS,
+       (SELECT COUNT(*) FROM ASK_REPORTS.CORE.SAVED_ANSWERS s WHERE s.DOC_ID = d.DOC_ID) AS SAVED_ANSWERS,
        d.ERROR
-FROM DOCUMENTS d
+FROM ASK_REPORTS.CORE.DOCUMENTS d
 ORDER BY d.COLLECTION, d.TITLE;

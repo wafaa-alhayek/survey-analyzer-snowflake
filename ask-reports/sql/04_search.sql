@@ -32,7 +32,7 @@ AS
 -- Wake and sleep. The app (which runs as its owner) calls WAKE_SEARCH
 -- when a question finds the service asleep.
 -- ---------------------------------------------------------------------
-CREATE OR REPLACE PROCEDURE WAKE_SEARCH()
+CREATE OR REPLACE PROCEDURE ASK_REPORTS.CORE.WAKE_SEARCH()
 RETURNS STRING
 LANGUAGE SQL
 EXECUTE AS OWNER
@@ -45,7 +45,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE PROCEDURE SLEEP_SEARCH()
+CREATE OR REPLACE PROCEDURE ASK_REPORTS.CORE.SLEEP_SEARCH()
 RETURNS STRING
 LANGUAGE SQL
 EXECUTE AS OWNER
