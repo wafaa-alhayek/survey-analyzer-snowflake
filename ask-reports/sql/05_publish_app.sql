@@ -17,6 +17,9 @@ CREATE OR REPLACE STREAMLIT ASK_REPORTS.CORE.ASK_APP
   FROM '@SURVEY_ANALYZER.CORE.APP_REPO/branches/main/ask-reports/streamlit/'
   MAIN_FILE = 'streamlit_app.py'
   QUERY_WAREHOUSE = SURVEY_WH
+  -- Without this, new apps now default to the container runtime on a
+  -- compute pool, which costs credits while open and needs pyproject.toml
+  RUNTIME_NAME = 'SYSTEM$WAREHOUSE_RUNTIME'
   TITLE = 'Ask your reports by Describe';
 
 ALTER STREAMLIT ASK_REPORTS.CORE.ASK_APP ADD LIVE VERSION FROM LAST;
